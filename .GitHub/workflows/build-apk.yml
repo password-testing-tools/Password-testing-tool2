@@ -1,0 +1,105 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.8'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          git \
+          zip \
+          unzip \
+          openjdk-11-jdk \
+          python3-pip \
+          autoconf \
+          libtool \
+          pkg-config \
+          zlib1g-dev \
+          libncurses5-dev \
+          libncursesw5-dev \
+          libtinfo5 \
+          cmake \
+          libffi-dev \
+          libssl-dev
+          
+    - name: Install python-for-android
+      run: |
+        pip install --upgrade pip
+        pip install cython virtualenv
+        pip install git+https://github.com/kivy/python-for-android.git
+        
+    - name: Setup Android SDK
+      run: |
+        mkdir -p $HOME/android-sdk
+        cd $HOME/android-sdk
+        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip commandlinetools-linux-9477386_latest.zip
+        mkdir -p cmdline-tools/latest
+        mv cmdline-tools/* cmdline-tools/latest/ || true
+        export ANDROID_HOME=$HOME/android-sdk
+        export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;30.0.3"
+        
+    - name: Setup Android NDK
+      run: |
+        cd $HOME
+        wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+        unzip android-ndk-r25c-linux.zip
+        export ANDROID_NDK_HOME=$HOME/android-ndk-r25c
+        
+    - name: Build APK with python-for-android
+      run: |
+        export ANDROID_HOME=$HOME/android-sdk
+        export ANDROID_NDK_HOME=$HOME/android-ndk-r25c
+        export PATH=$PATH:$ANDROID_HOME/platform-tools
+        
+        # Create a simple buildozer.spec file
+        cat > buildozer.spec << 'EOF'
+        [app]
+        title = Password Testing Tool
+        package.name = passwordtester
+        package.domain = com.passwordtestingtool
+        
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas,txt
+        
+        version = 1.0
+        requirements = python3,flask,requests,beautifulsoup4
+        orientation = portrait
+        
+        [buildozer]
+        log_level = 2
+        
+        [android]
+        api = 31
+        minapi = 21
+        ndk = 25c
+        permissions = INTERNET,ACCESS_NETWORK_STATE
+        EOF
+        
+        # Install buildozer and build
+        pip install buildozer cython
+        buildozer android debug
+        
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: password-tester-apk
+        path: ./bin/*.apk
